@@ -19,7 +19,11 @@ Notes:
 - scikit-learn and matplotlib are optional (same as before).
 """
 
-from __future__ import annotations
+# ============================================================
+# emr_core.py
+# Core EMR logic (UI-agnostic)
+# Lazy data initialization – REQUIRED for GitHub / Streamlit
+# ============================================================
 
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
@@ -27,60 +31,32 @@ from datetime import timedelta
 
 import pandas as pd
 
-
-from pathlib import Path
-
-BASE = Path(__file__).parent / "mimic-iv-clinical-database-demo-2.2"
-
-
-ADMISSIONS = None
-LABS = None
-MEDS = None
-VITALS = None
-DIAG = None
-ICD = None
-LAB_LOOKUP = None
-
-ADMISSIONS = LABS = MEDS = VITALS = DIAG = ICD = None
-LAB_LOOKUP = {}
-def initialize_data(base_path: str):
-    global ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP
-
-    base = Path(base_path)
-    (
-        ADMISSIONS,
-        LABS,
-        MEDS,
-        VITALS,
-        DIAG,
-        ICD,
-        LAB_LOOKUP
-    ) = load_all_tables(base)
-
 # Optional: scikit-learn for RAG Q&A
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.metrics.pairwise import cosine_similarity
     SKLEARN_AVAILABLE = True
-except Exception:
+except ImportError:
     SKLEARN_AVAILABLE = False
 
-# Optional: matplotlib for plots (NO tkinter embedding here)
+# Optional: matplotlib for trends (logic only)
 try:
     import matplotlib.pyplot as plt
     MATPLOTLIB_AVAILABLE = True
-except Exception:
+except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
-# ============================================================
-# CONFIG – update this path to your MIMIC-IV demo folder
-# ============================================================
-#BASE = Path(__file__).parent / "mimic-iv-clinical-database-demo-2.2"
-HOSP = BASE / "hosp"
-ICU = BASE / "icu"
 
 # ============================================================
-# DATA LOADING
+# GLOBALS (LAZY-LOADED)
+# ============================================================
+
+ADMISSIONS = LABS = MEDS = VITALS = DIAG = ICD = None
+LAB_LOOKUP = {}
+
+
+# ============================================================
+# DATA LOADING (NO HARDCODED PATHS)
 # ============================================================
 
 def load_all_tables(base: Path):
@@ -92,41 +68,63 @@ def load_all_tables(base: Path):
     hosp = base / "hosp"
     icu = base / "icu"
 
-
     admissions = pd.read_csv(
-        HOSP / "admissions.csv.gz",
+        hosp / "admissions.csv.gz",
         parse_dates=["admittime", "dischtime", "deathtime"],
     )
     labs = pd.read_csv(
-        HOSP / "labevents.csv.gz",
+        hosp / "labevents.csv.gz",
         parse_dates=["charttime"],
     )
     meds = pd.read_csv(
-        HOSP / "prescriptions.csv.gz",
+        hosp / "prescriptions.csv.gz",
         parse_dates=["starttime", "stoptime"],
     )
     vitals = pd.read_csv(
-        ICU / "chartevents.csv.gz",
+        icu / "chartevents.csv.gz",
         parse_dates=["charttime"],
     )
-    diag = pd.read_csv(HOSP / "diagnoses_icd.csv.gz")
-    icd = pd.read_csv(HOSP / "d_icd_diagnoses.csv.gz")
-    labitems = pd.read_csv(HOSP / "d_labitems.csv.gz")
+    diag = pd.read_csv(hosp / "diagnoses_icd.csv.gz")
+    icd = pd.read_csv(hosp / "d_icd_diagnoses.csv.gz")
+    labitems = pd.read_csv(hosp / "d_labitems.csv.gz")
 
     lab_lookup = dict(zip(labitems["itemid"], labitems["label"]))
+
     return admissions, labs, meds, vitals, diag, icd, lab_lookup
 
 
-# Load once (same behavior as your original file)
-# ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP = load_all_tables()
+def initialize_data(base_path: str):
+    """
+    Must be called once before any patient queries.
+    """
+    global ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP
+
+    base = Path(base_path)
+    (
+        ADMISSIONS,
+        LABS,
+        MEDS,
+        VITALS,
+        DIAG,
+        ICD,
+        LAB_LOOKUP,
+    ) = load_all_tables(base)
 
 
-global ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP
+def _check_initialized():
+    if ADMISSIONS is None:
+        raise RuntimeError(
+            "Data not initialized. Call initialize_data(base_path) first."
+        )
 
-if ADMISSIONS is None:
-    # ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP = load_all_tables()
+
+# ============================================================
+# PATIENT LOADING
+# ============================================================
 
 def load_patient_data(subject_id: int) -> Dict[str, Any] | None:
+    _check_initialized()
+
     p_adm = ADMISSIONS[ADMISSIONS["subject_id"] == subject_id].copy()
     if p_adm.empty:
         return None
@@ -147,7 +145,6 @@ def load_patient_data(subject_id: int) -> Dict[str, Any] | None:
         "vitals": p_vitals,
         "dx": p_dx,
     }
-
 
 # ============================================================
 # LAB/VITAL/MED ABNORMALITY DETECTION
