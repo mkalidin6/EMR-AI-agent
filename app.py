@@ -6,6 +6,18 @@ import matplotlib.pyplot as plt
 # This module contains all logic: loading, analysis, alerts, trends, Q&A, etc.
 import emr_core as core
 
+
+st.title("EMR Assistant")
+
+base_path = st.text_input(
+    "Path to MIMIC-IV demo folder",
+    value=""
+)
+
+if st.button("Initialize data"):
+    core.initialize_data(base_path)
+    st.success("Data loaded successfully")
+
 def reset_patient_state():
     """Clear all patient-specific Streamlit state."""
     for k in [
