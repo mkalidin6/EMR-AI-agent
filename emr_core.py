@@ -26,6 +26,21 @@ from typing import Dict, Any, List, Tuple
 from datetime import timedelta
 
 import pandas as pd
+ADMISSIONS = LABS = MEDS = VITALS = DIAG = ICD = None
+LAB_LOOKUP = {}
+def initialize_data(base_path: str):
+    global ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP
+
+    base = Path(base_path)
+    (
+        ADMISSIONS,
+        LABS,
+        MEDS,
+        VITALS,
+        DIAG,
+        ICD,
+        LAB_LOOKUP
+    ) = load_all_tables(base)
 
 # Optional: scikit-learn for RAG Q&A
 try:
@@ -45,7 +60,7 @@ except Exception:
 # ============================================================
 # CONFIG – update this path to your MIMIC-IV demo folder
 # ============================================================
-BASE = Path(__file__).parent / "mimic-iv-clinical-database-demo-2.2"
+#BASE = Path(__file__).parent / "mimic-iv-clinical-database-demo-2.2"
 HOSP = BASE / "hosp"
 ICU = BASE / "icu"
 
@@ -53,11 +68,15 @@ ICU = BASE / "icu"
 # DATA LOADING
 # ============================================================
 
-def load_all_tables():
-    if not BASE.exists():
+def load_all_tables(base: Path):
+    if not base.exists():
         raise FileNotFoundError(
-            f"Base folder {BASE} not found. Adjust BASE path in the code."
+            f"Base folder {base} not found. Adjust BASE path."
         )
+
+    hosp = base / "hosp"
+    icu = base / "icu"
+
 
     admissions = pd.read_csv(
         HOSP / "admissions.csv.gz",
@@ -84,8 +103,12 @@ def load_all_tables():
 
 
 # Load once (same behavior as your original file)
-ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP = load_all_tables()
+#ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP = load_all_tables()
 
+if ADMISSIONS is None:
+    raise RuntimeError(
+        "Data not initialized. Call initialize_data(base_path) first."
+    )
 
 def load_patient_data(subject_id: int) -> Dict[str, Any] | None:
     p_adm = ADMISSIONS[ADMISSIONS["subject_id"] == subject_id].copy()
