@@ -45,8 +45,7 @@ except Exception:
 # ============================================================
 # CONFIG – update this path to your MIMIC-IV demo folder
 # ============================================================
-
-BASE = Path(r"EMR-AI-Agent/mimic-iv-clinical-database-demo-2.2")
+BASE = Path(__file__).parent / "data"
 HOSP = BASE / "hosp"
 ICU = BASE / "icu"
 
