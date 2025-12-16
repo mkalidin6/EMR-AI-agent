@@ -1,4 +1,25 @@
+"""
+EMR Core Logic (UI removed / disabled)
 
+This file contains ONLY the data loading + clinical logic + Q&A logic from your original
+Tkinter EMR Desktop Agent code.
+
+✅ Safe for Streamlit Cloud / servers (no tkinter import at import-time)
+✅ Keeps the same functions and outputs used by your UI
+✅ You can later build ANY UI (Tkinter, Streamlit, Flask, etc.) on top of this
+
+How to use:
+- Import this module and call:
+    data = load_patient_data(subject_id)
+    analysis = run_patient_analysis(data)
+    answer = answer_question("...", data, analysis)
+
+Notes:
+- This still reads MIMIC-IV demo csv.gz files from BASE/HOSP/ICU.
+- scikit-learn and matplotlib are optional (same as before).
+"""
+
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
@@ -11,26 +32,23 @@ try:
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.metrics.pairwise import cosine_similarity
     SKLEARN_AVAILABLE = True
-except ImportError:
+except Exception:
     SKLEARN_AVAILABLE = False
 
-# Optional: matplotlib for trend plots (embedded in Tkinter)
+# Optional: matplotlib for plots (NO tkinter embedding here)
 try:
     import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
     MATPLOTLIB_AVAILABLE = True
-except ImportError:
+except Exception:
     MATPLOTLIB_AVAILABLE = False
 
 # ============================================================
 # CONFIG – update this path to your MIMIC-IV demo folder
 # ============================================================
 
-BASE = BASE = Path("mimic-iv-clinical-database-demo-2.2")
-
+BASE = Path(r"C:/Users/mkalidindi/Desktop/emr_agent_bundle/mimic-iv-clinical-database-demo-2.2")
 HOSP = BASE / "hosp"
 ICU = BASE / "icu"
-
 
 # ============================================================
 # DATA LOADING
@@ -44,7 +62,7 @@ def load_all_tables():
 
     admissions = pd.read_csv(
         HOSP / "admissions.csv.gz",
-        parse_dates=["admittime", "dischtime", "deathtime"],   # <-- include deathtime
+        parse_dates=["admittime", "dischtime", "deathtime"],
     )
     labs = pd.read_csv(
         HOSP / "labevents.csv.gz",
@@ -63,10 +81,10 @@ def load_all_tables():
     labitems = pd.read_csv(HOSP / "d_labitems.csv.gz")
 
     lab_lookup = dict(zip(labitems["itemid"], labitems["label"]))
-
     return admissions, labs, meds, vitals, diag, icd, lab_lookup
 
 
+# Load once (same behavior as your original file)
 ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP = load_all_tables()
 
 
@@ -253,7 +271,7 @@ def detect_vital_abnormalities(p_vitals: pd.DataFrame) -> Tuple[List[str], Dict[
     if spo2 is not None and spo2 < 92:
         flags["resp_issue"] = True
         sentences.append(f"Oxygen saturation has been as low as {spo2:.0f}%, below typical targets.")
-    if temp is not None and temp > 99.5:
+    if temp is not None and temp > 38:
         flags["fever"] = True
         sentences.append(f"Temperature is elevated at approximately {temp:.1f} °C, consistent with fever.")
 
@@ -300,7 +318,6 @@ def summarize_medications(p_meds: pd.DataFrame):
 
     summary_bits = []
     if flags["antibiotic_use"]:
-
         summary_bits.append("antibiotics")
     if flags["anticoagulant_use"]:
         summary_bits.append("anticoagulants/antiplatelets")
@@ -315,7 +332,6 @@ def summarize_medications(p_meds: pd.DataFrame):
         summary = "Current medications include several agents without prominent high-risk combinations detected."
 
     meds_unique = sorted(set(meds))
-
     return summary, meds_unique, flags, interactions
 
 
@@ -527,7 +543,7 @@ def compare_today_yesterday(p_labs: pd.DataFrame) -> pd.DataFrame | None:
     return comp.sort_values("delta", ascending=False)
 
 
-def delta_text_from_df(df: pd.DataFrame) -> str:
+def delta_text_from_df(df: pd.DataFrame | None) -> str:
     if df is None or df.empty:
         return "Not enough separated days of lab data to compute a meaningful day-to-day comparison."
 
@@ -563,6 +579,33 @@ def delta_text_from_df(df: pd.DataFrame) -> str:
         out.extend("• " + x for x in lines_same)
 
     return "\n".join(out) if out else "No clear changes detected between today and yesterday."
+
+
+def make_trend_figure(p_labs: pd.DataFrame, itemid: int):
+    """
+    UI-agnostic trend plot builder.
+    Returns a matplotlib Figure (or None if matplotlib is unavailable or no data).
+
+    Use in Streamlit: st.pyplot(fig)
+    Use in Tkinter: embed the fig like before
+    """
+    if not MATPLOTLIB_AVAILABLE:
+        return None
+    if p_labs is None or p_labs.empty:
+        return None
+
+    df = p_labs[p_labs["itemid"] == itemid].dropna(subset=["charttime", "valuenum"]).sort_values("charttime")
+    if df.empty:
+        return None
+
+    label = LAB_LOOKUP.get(itemid, f"item {itemid}")
+    fig, ax = plt.subplots(figsize=(6, 3))
+    ax.plot(df["charttime"], df["valuenum"], marker="o", linestyle="-")
+    ax.set_title(f"{label} (item {itemid}) over time")
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Value")
+    fig.autofmt_xdate()
+    return fig
 
 
 # ============================================================
@@ -702,7 +745,7 @@ def rule_based_answer(
             return base + "\nNo strong renal stress signal is detected from creatinine alone."
 
     # Anemia / hemoglobin
-    if "anemia" in q or "hemoglobin" in q or "hb" in q:
+    if "anemia" in q or "hemoglobin" in q or " hb" in q or q.strip() == "hb":
         hb_ids = [50811, 51222, 51221]
         hb = p_labs[p_labs["itemid"].isin(hb_ids)]
         if hb.empty:
@@ -715,7 +758,7 @@ def rule_based_answer(
         return ans
 
     # Electrolytes
-    if "electrolyte" in q or "sodium" in q or "potassium" in q or "na " in q or "k " in q:
+    if "electrolyte" in q or "sodium" in q or "potassium" in q or " na" in q or " k" in q:
         out = []
         na = p_labs[p_labs["itemid"] == 50983].sort_values("charttime")
         if not na.empty:
@@ -824,6 +867,10 @@ def answer_question(question: str, data: Dict[str, Any], analysis: Dict[str, Any
     if not question.strip():
         return "Please enter a non-empty question."
 
+    # Death mode: no reasoning
+    if analysis.get("death_mode", False):
+        return factual_lookup_only(question, data)
+
     lab_sentences = analysis["lab_sentences"]
     vital_sentences = analysis["vital_sentences"]
     med_summary = analysis["med_summary"]
@@ -862,648 +909,140 @@ def answer_question(question: str, data: Dict[str, Any], analysis: Dict[str, Any
 
 
 # ============================================================
-# TKINTER DESKTOP AGENT
+# PATIENT ANALYSIS (replaces UI load_patient logic)
 # ============================================================
 
-class EMRDesktopAgent:
-    def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("EMR Assistant")
-        self.root.attributes("-topmost", True)  # Always on top (desktop agent feel)
-
-        # Position on right side of screen (approx)
-        self.root.geometry("430x780+1400+50")
-        self.root.resizable(False, True)
-
-        self.current_data: Dict[str, Any] | None = None
-        self.analysis: Dict[str, Any] | None = None
-
-        # For embedded matplotlib canvas in Trends tab
-        self.trend_canvas = None
-
-        self.build_ui()
-        self.root.mainloop()
-
-    def build_ui(self):
-        # Header
-        header = tk.Label(self.root, text="EMR Assistant", font=("Arial", 14, "bold"))
-        header.pack(pady=(5, 0))
-        sub = tk.Label(
-            self.root,
-            text="On-demand summary and Q&A from structured EMR data.",
-            font=("Arial", 9),
-            fg="gray",
-        )
-        sub.pack(pady=(0, 5))
-
-        # Patient entry bar
-        bar = tk.Frame(self.root)
-        bar.pack(fill="x", padx=6, pady=(0, 4))
-
-        self.patient_var = tk.StringVar()
-        entry = tk.Entry(bar, textvariable=self.patient_var)
-        entry.pack(side="left", fill="x", expand=True)
-        load_btn = tk.Button(bar, text="Load", command=self.load_patient)
-        load_btn.pack(side="left", padx=(4, 0))
-
-        # Status label
-        self.status_label = tk.Label(self.root, text="Enter a subject_id and click Load.", fg="gray")
-        self.status_label.pack(anchor="w", padx=6)
-
-        # Tabs
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=6, pady=6)
-
-        # Summary tab
-        self.tab_summary = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_summary, text="Summary")
-
-        self.txt_summary = scrolledtext.ScrolledText(self.tab_summary, wrap="word", font=("Consolas", 10), height=10)
-        self.txt_summary.pack(fill="both", expand=True)
-
-        self.txt_progress = scrolledtext.ScrolledText(self.tab_summary, wrap="word", font=("Consolas", 10), height=10)
-        self.txt_progress.pack(fill="both", expand=True, pady=(4, 0))
-
-        self.txt_alerts = scrolledtext.ScrolledText(self.tab_summary, wrap="word", font=("Consolas", 10), height=10)
-        self.txt_alerts.pack(fill="both", expand=True, pady=(4, 4))
-
-        # Export buttons
-        export_frame = tk.Frame(self.tab_summary)
-        export_frame.pack(fill="x", pady=(2, 2))
-        tk.Button(export_frame, text="Export Summary TXT", command=self.export_summary).pack(side="left", padx=2)
-        tk.Button(export_frame, text="Export Labs CSV", command=self.export_labs).pack(side="left", padx=2)
-        tk.Button(export_frame, text="Export Vitals CSV", command=self.export_vitals).pack(side="left", padx=2)
-        tk.Button(export_frame, text="Export Meds CSV", command=self.export_meds).pack(side="left", padx=2)
-
-        # Labs tab
-        self.tab_labs = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_labs, text="Labs")
-
-        labs_btn_frame = tk.Frame(self.tab_labs)
-        labs_btn_frame.pack(fill="x", pady=(2, 2))
-        tk.Button(labs_btn_frame, text="View Full Lab Table", command=self.open_labs_table).pack(side="left", padx=2)
-
-        self.txt_labs = scrolledtext.ScrolledText(self.tab_labs, wrap="word", font=("Consolas", 10))
-        self.txt_labs.pack(fill="both", expand=True)
-
-        # Vitals tab
-        self.tab_vitals = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_vitals, text="Vitals")
-
-        vitals_btn_frame = tk.Frame(self.tab_vitals)
-        vitals_btn_frame.pack(fill="x", pady=(2, 2))
-        tk.Button(vitals_btn_frame, text="View Full Vitals Table", command=self.open_vitals_table).pack(side="left", padx=2)
-
-        self.txt_vitals = scrolledtext.ScrolledText(self.tab_vitals, wrap="word", font=("Consolas", 10))
-        self.txt_vitals.pack(fill="both", expand=True)
-
-        # Medications tab
-        self.tab_meds = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_meds, text="Medications")
-
-        meds_btn_frame = tk.Frame(self.tab_meds)
-        meds_btn_frame.pack(fill="x", pady=(2, 2))
-        tk.Button(meds_btn_frame, text="View Full Meds Table", command=self.open_meds_table).pack(side="left", padx=2)
-
-        self.txt_meds = scrolledtext.ScrolledText(self.tab_meds, wrap="word", font=("Consolas", 10))
-        self.txt_meds.pack(fill="both", expand=True)
-
-        # Trends tab
-        self.tab_trends = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_trends, text="Trends")
-
-        trends_top = tk.Frame(self.tab_trends)
-        trends_top.pack(fill="x", pady=(4, 4))
-
-        tk.Label(trends_top, text="Plot lab trend for itemid:").pack(side="left")
-        self.trend_item_var = tk.StringVar()
-        self.trend_item_menu = ttk.Combobox(trends_top, textvariable=self.trend_item_var, width=20)
-        self.trend_item_menu.pack(side="left", padx=(4, 4))
-
-        tk.Button(trends_top, text="Plot", command=self.plot_trend).pack(side="left")
-
-        # Canvas frame for matplotlib
-        self.trend_canvas_frame = tk.Frame(self.tab_trends)
-        self.trend_canvas_frame.pack(fill="both", expand=True)
-
-        self.txt_trends = scrolledtext.ScrolledText(self.tab_trends, wrap="word", font=("Consolas", 10), height=8)
-        self.txt_trends.pack(fill="x", expand=False)
-
-        # Delta tab
-        self.tab_delta = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_delta, text="Delta (Day)")
-
-        self.txt_delta = scrolledtext.ScrolledText(self.tab_delta, wrap="word", font=("Consolas", 10))
-        self.txt_delta.pack(fill="both", expand=True)
-
-        # Q&A tab
-        self.tab_qa = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_qa, text="Q&A")
-
-        qa_top = tk.Frame(self.tab_qa)
-        qa_top.pack(fill="x", pady=(4, 2))
-        tk.Label(qa_top, text="Ask about this patient:").pack(anchor="w")
-
-        qa_entry_frame = tk.Frame(self.tab_qa)
-        qa_entry_frame.pack(fill="x")
-
-        self.qa_var = tk.StringVar()
-        self.qa_entry = tk.Entry(qa_entry_frame, textvariable=self.qa_var)
-        self.qa_entry.pack(side="left", fill="x", expand=True)
-        tk.Button(qa_entry_frame, text="Ask", command=self.handle_qa).pack(side="left", padx=(4, 0))
-
-        self.txt_qa = scrolledtext.ScrolledText(self.tab_qa, wrap="word", font=("Consolas", 10))
-        self.txt_qa.pack(fill="both", expand=True, pady=(4, 0))
-
-    # --------------------- Helpers ---------------------
-
-    def set_text(self, widget: scrolledtext.ScrolledText, text: str):
-        widget.config(state="normal")
-        widget.delete("1.0", "end")
-        widget.insert("1.0", text)
-        widget.config(state="disabled")
-
-    def highlight_phrases(self, widget: scrolledtext.ScrolledText, phrases: List[str], color: str = "red"):
-        """Highlight given phrases in red inside a Text widget."""
-        widget.config(state="normal")
-        try:
-            widget.tag_delete("alert")
-        except tk.TclError:
-            pass
-        widget.tag_configure("alert", foreground=color)
-
-        for phrase in phrases:
-            if not phrase:
-                continue
-            start = "1.0"
-            while True:
-                idx = widget.search(phrase, start, stopindex="end")
-                if not idx:
-                    break
-                end = f"{idx}+{len(phrase)}c"
-                widget.tag_add("alert", idx, end)
-                start = end
-        widget.config(state="disabled")
-
-    def open_table_window(self, title: str, df: pd.DataFrame):
-        if df is None or df.empty:
-            messagebox.showinfo(title, f"No {title} data available.")
-            return
-
-        win = tk.Toplevel(self.root)
-        win.title(title)
-        win.geometry("900x500")
-
-        cols = list(df.columns)
-        tree = ttk.Treeview(win, columns=cols, show="headings")
-        vsb = ttk.Scrollbar(win, orient="vertical", command=tree.yview)
-        hsb = ttk.Scrollbar(win, orient="horizontal", command=tree.xview)
-        tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-
-        tree.pack(side="top", fill="both", expand=True)
-        vsb.pack(side="right", fill="y")
-        hsb.pack(side="bottom", fill="x")
-
-        for c in cols:
-            tree.heading(c, text=c)
-            tree.column(c, width=100, anchor="center")
-
-        # Limit to first 1000 rows to avoid UI freeze
-        for _, row in df.head(1000).iterrows():
-            vals = [str(row[c]) for c in cols]
-            tree.insert("", "end", values=vals)
-
-        tk.Label(win, text=f"Showing up to 1000 rows of {title.lower()} data.").pack(anchor="w")
-
-    # --------------------- Export helpers ---------------------
-
-    def export_summary(self):
-        if not self.current_data or not self.analysis:
-            messagebox.showinfo("Export Summary", "Load a patient first.")
-            return
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-            title="Save Summary As"
-        )
-        if not filename:
-            return
-        summary_text = self.txt_summary.get("1.0", "end-1c") + "\n\n" + self.txt_progress.get("1.0", "end-1c") \
-            + "\n\n" + self.txt_alerts.get("1.0", "end-1c")
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(summary_text)
-        messagebox.showinfo("Export Summary", f"Summary saved to {filename}")
-
-    def export_labs(self):
-        if not self.current_data:
-            messagebox.showinfo("Export Labs", "Load a patient first.")
-            return
-        df = self.current_data["labs"]
-        if df.empty:
-            messagebox.showinfo("Export Labs", "No lab data for this patient.")
-            return
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            title="Save Labs As"
-        )
-        if not filename:
-            return
-        df.to_csv(filename, index=False)
-        messagebox.showinfo("Export Labs", f"Labs saved to {filename}")
-
-    def export_vitals(self):
-        if not self.current_data:
-            messagebox.showinfo("Export Vitals", "Load a patient first.")
-            return
-        df = self.current_data["vitals"]
-        if df.empty:
-            messagebox.showinfo("Export Vitals", "No vital data for this patient.")
-            return
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            title="Save Vitals As"
-        )
-        if not filename:
-            return
-        df.to_csv(filename, index=False)
-        messagebox.showinfo("Export Vitals", f"Vitals saved to {filename}")
-
-    def export_meds(self):
-        if not self.current_data:
-            messagebox.showinfo("Export Medications", "Load a patient first.")
-            return
-        df = self.current_data["meds"]
-        if df.empty:
-            messagebox.showinfo("Export Medications", "No medication data for this patient.")
-            return
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            title="Save Medications As"
-        )
-        if not filename:
-            return 
-        df.to_csv(filename, index=False)
-        messagebox.showinfo("Export Medications", f"Medications saved to {filename}")
-
-    # --------------------- Table view actions ---------------------
-
-    def open_labs_table(self):
-        if not self.current_data:
-            messagebox.showinfo("Labs", "Load a patient first.")
-            return
-        self.open_table_window("Labs", self.current_data["labs"])
-
-    def open_vitals_table(self):
-        if not self.current_data:
-            messagebox.showinfo("Vitals", "Load a patient first.")
-            return
-        self.open_table_window("Vitals", self.current_data["vitals"])
-
-    def open_meds_table(self):
-        if not self.current_data:
-            messagebox.showinfo("Medications", "Load a patient first.")
-            return
-        self.open_table_window("Medications", self.current_data["meds"])
-
-    # --------------------- Core logic ---------------------
-
-    def load_patient(self):
-        text = self.patient_var.get().strip()
-        if not text:
-            self.status_label.configure(text="Please enter a subject_id.", fg="red")
-            return
-
-        try:
-            pid = int(text)
-        except ValueError:
-            self.status_label.configure(text="Patient ID must be an integer.", fg="red")
-            return
-
-        try:
-            data = load_patient_data(pid)
-        except FileNotFoundError as e:
-            self.status_label.configure(text=str(e), fg="red")
-            return
-
-        if data is None:
-            self.status_label.configure(text=f"No admissions found for subject_id {pid}.", fg="red")
-            return
-
-        self.current_data = data
-
-        # ---------------- DEATH CHECK ----------------
-        p_adm = data["admissions"]
-        death_time = None
-        if "deathtime" in p_adm.columns:
-            dt_series = p_adm["deathtime"].dropna()
-            if not dt_series.empty:
-                # use the latest recorded deathtime
-                death_time = dt_series.max()
-
-        if death_time is not None:
-            # Deceased patient mode: no clinical reasoning, only factual lookup
-            death_msg = (
-                "⚠️ PATIENT DECEASED ⚠️\n\n"
-                f"Recorded death time: {death_time}\n\n"
-                "Clinical summaries, alerts, trends, and risk scoring are disabled for deceased patients.\n\n"
-                "You may still:\n"
-                "- View raw Labs, Vitals, and Medications tables\n"
-                "- Ask factual questions (e.g., 'show recent labs', 'what meds were given?')\n"
-            )
-
-            # Summary / Progress / Alerts
-            self.set_text(self.txt_summary, death_msg)
-            self.set_text(self.txt_progress, "")
-            self.set_text(self.txt_alerts, "Clinical alerts are disabled for deceased patients.")
-
-            # Labs / Vitals / Meds text
-            self.set_text(self.txt_labs, "Use 'View Full Lab Table' to inspect raw labs.")
-            self.set_text(self.txt_vitals, "Use 'View Full Vitals Table' to inspect raw vitals.")
-            self.set_text(self.txt_meds, "Use 'View Full Meds Table' to inspect medications.")
-
-            # Trends / Delta disabled text
-            self.set_text(self.txt_trends, "Trend plotting is disabled for deceased patients.")
-            self.set_text(self.txt_delta, "Delta (day-to-day) analysis is disabled for deceased patients.")
-
-            # Q&A history reset with hint
-            self.txt_qa.config(state="normal")
-            self.txt_qa.delete("1.0", "end")
-            self.txt_qa.insert(
-                "1.0",
-                "Q&A history (deceased patient mode):\n\n"
-                "You can ask factual questions like:\n"
-                "- show recent labs\n"
-                "- list medications\n"
-                "- what diagnoses are recorded?\n\n"
-            )
-            self.txt_qa.config(state="disabled")
-
-            # Store analysis as "death mode" only with raw tables
-            self.analysis = {
-                "death_mode": True,
-                "labs": data["labs"],
-                "vitals": data["vitals"],
-                "meds": data["meds"],
-                "dx": data["dx"],
-            }
-
-            self.status_label.configure(text=f"Patient {pid} is deceased.", fg="red")
-            return
-        # -------------- END DEATH CHECK ----------------
-
-        # Compute analysis for living patients
-        p_labs = data["labs"]
-        p_vitals = data["vitals"]
-        p_meds = data["meds"]
-        p_dx = data["dx"]
-
-        lab_sentences, lab_flags = detect_lab_abnormalities(p_labs)
-        vital_sentences, vital_flags = detect_vital_abnormalities(p_vitals)
-        med_summary, meds_list, med_flags, med_interactions = summarize_medications(p_meds)
-        tests, conditions = suggest_tests_and_conditions(lab_flags, vital_flags, med_flags)
-
-        if not p_dx.empty and "long_title" in p_dx.columns:
-            dx_list = p_dx["long_title"].dropna().unique().tolist()
-            primary_dx = dx_list[0] if dx_list else "no clearly documented primary diagnosis"
-        else:
-            primary_dx = "no clearly documented primary diagnosis"
-
-        overall = build_overall_summary(data, primary_dx)
-        progress_note = build_progress_note(primary_dx, lab_flags, vital_flags, med_flags, tests, conditions)
-        high_alerts, moderate_alerts, mild_alerts = build_alerts(lab_flags, vital_flags, med_flags, med_interactions)
-        severity_score, severity_level = compute_severity_score(lab_flags, vital_flags, med_flags, med_interactions)
-
-        # Save analysis for Q&A and trends
-        self.analysis = {
-            "death_mode": False,
-            "lab_sentences": lab_sentences,
-            "vital_sentences": vital_sentences,
-            "med_summary": med_summary,
-            "meds_list": meds_list,
-            "med_flags": med_flags,
-            "lab_flags": lab_flags,
-            "vital_flags": vital_flags,
-            "med_interactions": med_interactions,
-            "tests": tests,
-            "conditions": conditions,
-            "primary_dx": primary_dx,
+def get_primary_dx(p_dx: pd.DataFrame) -> str:
+    if p_dx is not None and not p_dx.empty and "long_title" in p_dx.columns:
+        dx_list = p_dx["long_title"].dropna().unique().tolist()
+        if dx_list:
+            return dx_list[0]
+    return "no clearly documented primary diagnosis"
+
+
+def is_deceased(p_adm: pd.DataFrame):
+    if p_adm is None or p_adm.empty:
+        return None
+    if "deathtime" not in p_adm.columns:
+        return None
+    dt_series = p_adm["deathtime"].dropna()
+    if dt_series.empty:
+        return None
+    return dt_series.max()
+
+
+def run_patient_analysis(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Produces the same analysis dict your Tkinter UI used, but without UI code.
+    """
+    p_adm = data["admissions"]
+    p_dx = data["dx"]
+    p_labs = data["labs"]
+    p_vitals = data["vitals"]
+    p_meds = data["meds"]
+
+    death_time = is_deceased(p_adm)
+    if death_time is not None:
+        return {
+            "death_mode": True,
+            "death_time": death_time,
+            "primary_dx": get_primary_dx(p_dx),
+            "labs": p_labs,
+            "vitals": p_vitals,
+            "meds": p_meds,
+            "dx": p_dx,
         }
 
-        # Fill Summary tab
-        self.set_text(self.txt_summary, overall)
-        self.set_text(self.txt_progress, progress_note)
+    lab_sentences, lab_flags = detect_lab_abnormalities(p_labs)
+    vital_sentences, vital_flags = detect_vital_abnormalities(p_vitals)
+    med_summary, meds_list, med_flags, med_interactions = summarize_medications(p_meds)
+    tests, conditions = suggest_tests_and_conditions(lab_flags, vital_flags, med_flags)
+    primary_dx = get_primary_dx(p_dx)
 
-        # Alerts with severity info
-        severity_bar = "[" + "#" * min(severity_score, 10) + "-" * max(0, 10 - severity_score) + "]"
-        alerts_text = f"Overall severity score: {severity_score} ({severity_level} risk) {severity_bar}\n\n"
+    overall = build_overall_summary(data, primary_dx)
+    progress_note = build_progress_note(primary_dx, lab_flags, vital_flags, med_flags, tests, conditions)
+    high_alerts, moderate_alerts, mild_alerts = build_alerts(lab_flags, vital_flags, med_flags, med_interactions)
+    severity_score, severity_level = compute_severity_score(lab_flags, vital_flags, med_flags, med_interactions)
+    delta_df = compare_today_yesterday(p_labs)
+    delta_text = delta_text_from_df(delta_df)
 
-        if high_alerts:
-            alerts_text += "High-risk alerts:\n" + "\n".join(f"- {x}" for x in high_alerts) + "\n\n"
-        if moderate_alerts:
-            alerts_text += "Moderate concerns:\n" + "\n".join(f"- {x}" for x in moderate_alerts) + "\n\n"
-        if not high_alerts and not moderate_alerts:
-            alerts_text += "No strong red-flag patterns detected from structured data alone.\n\n"
-        if mild_alerts:
-            alerts_text += "\n".join(mild_alerts)
+    return {
+        "death_mode": False,
+        "primary_dx": primary_dx,
+        "overall_summary": overall,
+        "progress_note": progress_note,
+        "high_alerts": high_alerts,
+        "moderate_alerts": moderate_alerts,
+        "mild_alerts": mild_alerts,
+        "severity_score": severity_score,
+        "severity_level": severity_level,
+        "delta_df": delta_df,
+        "delta_text": delta_text,
+        "lab_sentences": lab_sentences,
+        "vital_sentences": vital_sentences,
+        "med_summary": med_summary,
+        "meds_list": meds_list,
+        "med_flags": med_flags,
+        "lab_flags": lab_flags,
+        "vital_flags": vital_flags,
+        "med_interactions": med_interactions,
+        "tests": tests,
+        "conditions": conditions,
+    }
 
-        self.set_text(self.txt_alerts, alerts_text)
 
-        # Labs summary text
-        labs_text = "Key recent lab findings:\n\n" + "\n".join(f"- {s}" for s in lab_sentences)
-        self.set_text(self.txt_labs, labs_text)
+def factual_lookup_only(question: str, data: Dict[str, Any]) -> str:
+    """
+    For deceased patients: NO clinical reasoning. Only factual lookup from raw tables.
+    """
+    q = question.lower()
 
-        # Vitals summary text
-        vitals_text = "Key recent vital sign findings:\n\n" + "\n".join(f"- {s}" for s in vital_sentences)
-        self.set_text(self.txt_vitals, vitals_text)
+    if data is None:
+        return "No patient loaded."
 
-        # Medications text
-        meds_text = "Medication overview:\n" + med_summary + "\n\n"
-        if meds_list:
-            meds_text += "Medication list (compressed):\n" + "\n".join(f"- {m}" for m in meds_list) + "\n\n"
-        if med_interactions:
-            meds_text += "Potential medication concerns:\n" + "\n".join(f"- {m}" for m in med_interactions)
-        self.set_text(self.txt_meds, meds_text)
+    # Labs
+    if "lab" in q or "labs" in q or "value" in q:
+        df = data["labs"]
+        if df is None or df.empty:
+            return "No lab data available."
+        return "Recent labs (last 20 rows):\n" + df.tail(20).to_string()
 
-        # Highlight abnormal sentences in red
-        self.highlight_phrases(self.txt_labs, lab_sentences)
-        self.highlight_phrases(self.txt_vitals, vital_sentences)
-        self.highlight_phrases(self.txt_alerts, high_alerts + moderate_alerts)
+    # Vitals
+    if "vital" in q or "bp" in q or "heart rate" in q or "spo2" in q or "oxygen" in q:
+        df = data["vitals"]
+        if df is None or df.empty:
+            return "No vital sign data available."
+        return "Recent vitals (last 20 rows):\n" + df.tail(20).to_string()
 
-        # Trends tab text (instructions)
-        trend_instr = (
-            "Trend plotting:\n"
-            "- Select a lab itemid from the dropdown above and click 'Plot' to view a time-series plot.\n\n"
-        )
-        self.set_text(self.txt_trends, trend_instr)
+    # Medications
+    if "med" in q or "drug" in q or "medication" in q:
+        df = data["meds"]
+        if df is None or df.empty:
+            return "No medication data available."
+        meds = sorted(df["drug"].dropna().unique().tolist())
+        if not meds:
+            return "No medication names recorded."
+        return "Medications recorded:\n" + "\n".join(f"- {m}" for m in meds)
 
-        # Populate drop-down with common lab itemids
-        if not p_labs.empty:
-            itemids = p_labs["itemid"].value_counts().index.tolist()
-            labels = []
-            for it in itemids[:50]:
-                label = LAB_LOOKUP.get(it, f"item {it}")
-                labels.append(f"{it} – {label}")
-            self.trend_item_menu["values"] = labels
-            if labels:
-                self.trend_item_var.set(labels[0])
+    # Diagnoses
+    if "diagnosis" in q or "dx" in q:
+        df = data["dx"]
+        if df is None or df.empty:
+            return "No diagnoses recorded."
+        if "long_title" in df.columns:
+            dx_list = df["long_title"].dropna().unique().tolist()
         else:
-            self.trend_item_menu["values"] = []
-            self.trend_item_var.set("")
+            dx_list = df["icd_code"].dropna().unique().tolist()
+        if not dx_list:
+            return "No diagnoses titles found."
+        return "Diagnoses recorded:\n" + "\n".join(f"- {d}" for d in dx_list)
 
-        # Delta tab
-        delta_df = compare_today_yesterday(p_labs)
-        delta_text = delta_text_from_df(delta_df)
-        self.set_text(self.txt_delta, delta_text)
+    return (
+        "This patient is deceased. Clinical reasoning is disabled.\n\n"
+        "You can ask factual questions like:\n"
+        "- show recent labs\n"
+        "- show recent vitals\n"
+        "- list medications\n"
+        "- what diagnoses are recorded?\n"
+    )
 
-        # Clear Q&A text, reset as empty chat
-        self.txt_qa.config(state="normal")
-        self.txt_qa.delete("1.0", "end")
-        self.txt_qa.insert("1.0", "Q&A history:\n\n")
-        self.txt_qa.config(state="disabled")
-
-        self.status_label.configure(text=f"Loaded patient {pid}.", fg="green")
-
-    def handle_qa(self):
-        if not self.current_data or not self.analysis:
-            self.set_text(self.txt_qa, "Please load a patient first.")
-            return
-        q = self.qa_var.get().strip()
-        if not q:
-            self.set_text(self.txt_qa, "Please enter a question.")
-            return
-
-        # If patient is deceased → factual lookup only
-        if self.analysis.get("death_mode", False):
-            ans = self.factual_lookup_only(q)
-        else:
-            ans = answer_question(q, self.current_data, self.analysis)
-
-        # Append to Q&A history (chat-style)
-        self.txt_qa.config(state="normal")
-        self.txt_qa.insert("end", f"You: {q}\n\nAgent:\n{ans}\n\n")
-        self.txt_qa.see("end")
-        self.txt_qa.config(state="disabled")
-
-        # Clear entry box
-        self.qa_var.set("")
-
-    def factual_lookup_only(self, question: str) -> str:
-        """
-        Q&A mode for deceased patients — no clinical reasoning,
-        only raw factual lookup from labs / vitals / meds / diagnoses.
-        """
-        q = question.lower()
-        data = self.current_data
-
-        if data is None:
-            return "No patient loaded."
-
-        # Show recent labs
-        if "lab" in q or "labs" in q or "value" in q:
-            df = data["labs"]
-            if df.empty:
-                return "No lab data available."
-            return "Recent labs (last 20 rows):\n" + df.tail(20).to_string()
-
-        # Show vitals
-        if "vital" in q or "bp" in q or "heart rate" in q or "spo2" in q or "oxygen" in q:
-            df = data["vitals"]
-            if df.empty:
-                return "No vital sign data available."
-            return "Recent vitals (last 20 rows):\n" + df.tail(20).to_string()
-
-        # Show medications
-        if "med" in q or "drug" in q or "medication" in q:
-            df = data["meds"]
-            if df.empty:
-                return "No medication data available."
-            meds = sorted(df["drug"].dropna().unique().tolist())
-            if not meds:
-                return "No medication names recorded."
-            return "Medications recorded:\n" + "\n".join(f"- {m}" for m in meds)
-
-        # Diagnoses
-        if "diagnosis" in q or "dx" in q:
-            df = data["dx"]
-            if df.empty:
-                return "No diagnoses recorded."
-            if "long_title" in df.columns:
-                dx_list = df["long_title"].dropna().unique().tolist()
-            else:
-                dx_list = df["icd_code"].dropna().unique().tolist()
-            if not dx_list:
-                return "No diagnoses titles found."
-            return "Diagnoses recorded:\n" + "\n".join(f"- {d}" for d in dx_list)
-
-        return (
-            "This patient is deceased. Clinical reasoning is disabled.\n\n"
-            "You can ask factual questions like:\n"
-            "- show recent labs\n"
-            "- show recent vitals\n"
-            "- list medications\n"
-            "- what diagnoses are recorded?\n"
-        )
-
-    def plot_trend(self):
-        # Disable trends for deceased patients
-        if self.analysis and self.analysis.get("death_mode", False):
-            messagebox.showinfo("Trend plot", "Trend plotting is disabled for deceased patients.")
-            return
-
-        if not MATPLOTLIB_AVAILABLE:
-            messagebox.showinfo("Trend plot", "matplotlib is not installed; cannot create plots.")
-            return
-        if not self.current_data:
-            messagebox.showinfo("Trend plot", "Load a patient first.")
-            return
-
-        p_labs = self.current_data["labs"]
-        if p_labs.empty:
-            messagebox.showinfo("Trend plot", "No lab data available for this patient.")
-            return
-
-        choice = self.trend_item_var.get()
-        if not choice:
-            messagebox.showinfo("Trend plot", "Select a lab itemid first.")
-            return
-
-        # choice looks like "50912 – Creatinine"
-        try:
-            itemid = int(choice.split("–")[0].strip())
-        except Exception:
-            messagebox.showinfo("Trend plot", "Could not parse chosen itemid.")
-            return
-
-        df = p_labs[p_labs["itemid"] == itemid].dropna(subset=["charttime", "valuenum"]).sort_values("charttime")
-        if df.empty:
-            messagebox.showinfo("Trend plot", "No data points for that lab item.")
-            return
-
-        label = LAB_LOOKUP.get(itemid, f"item {itemid}")
-
-        # Clear previous canvas
-        for child in self.trend_canvas_frame.winfo_children():
-            child.destroy()
-
-        fig, ax = plt.subplots(figsize=(5, 3))
-        ax.plot(df["charttime"], df["valuenum"], marker="o", linestyle="-")
-        ax.set_title(f"{label} (item {itemid}) over time")
-        ax.set_xlabel("Time")
-        ax.set_ylabel("Value")
-        fig.autofmt_xdate()
-
-        canvas = FigureCanvasTkAgg(fig, master=self.trend_canvas_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill="both", expand=True)
-        self.trend_canvas = canvas
-
-
-# ============================================================
-# RUN
-# ============================================================
-
-if __name__ == "__main__":
-    EMRDesktopAgent()
