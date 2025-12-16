@@ -26,6 +26,21 @@ from typing import Dict, Any, List, Tuple
 from datetime import timedelta
 
 import pandas as pd
+
+
+from pathlib import Path
+
+BASE = Path(__file__).parent / "mimic-iv-clinical-database-demo-2.2"
+
+
+ADMISSIONS = None
+LABS = None
+MEDS = None
+VITALS = None
+DIAG = None
+ICD = None
+LAB_LOOKUP = None
+
 ADMISSIONS = LABS = MEDS = VITALS = DIAG = ICD = None
 LAB_LOOKUP = {}
 def initialize_data(base_path: str):
@@ -105,10 +120,11 @@ def load_all_tables(base: Path):
 # Load once (same behavior as your original file)
 #ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP = load_all_tables()
 
+
+global ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP
+
 if ADMISSIONS is None:
-    raise RuntimeError(
-        "Data not initialized. Call initialize_data(base_path) first."
-    )
+    ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP = load_all_tables()
 
 def load_patient_data(subject_id: int) -> Dict[str, Any] | None:
     p_adm = ADMISSIONS[ADMISSIONS["subject_id"] == subject_id].copy()
