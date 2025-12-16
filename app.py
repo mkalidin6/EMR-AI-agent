@@ -15,8 +15,17 @@ base_path = st.text_input(
 )
 
 if st.button("Initialize data"):
-    core.initialize_data(base_path)
-    st.success("Data loaded successfully")
+    if not base_path.strip():
+        st.error("Please enter a valid MIMIC-IV base path.")
+    else:
+        try:
+            core.initialize_data(base_path)
+            st.session_state["data_initialized"] = True
+            st.success("Data loaded successfully")
+        except Exception as e:
+            st.session_state["data_initialized"] = False
+            st.error(str(e))
+
 
 def reset_patient_state():
     """Clear all patient-specific Streamlit state."""
@@ -60,6 +69,9 @@ if "data" not in st.session_state:
     st.session_state.data = None
 if "analysis" not in st.session_state:
     st.session_state.analysis = None
+if "data_initialized" not in st.session_state:
+    st.session_state.data_initialized = False
+
 
 
 # -----------------------------
@@ -141,8 +153,11 @@ with st.sidebar:
 # Load patient (calls core logic, unchanged)
 # -----------------------------
 if load:
-    if not pid_text.strip():
+    if not st.session_state.data_initialized:
+        st.sidebar.error("Please initialize data first.")
+    elif not pid_text.strip():
         st.sidebar.error("Please enter a subject_id.")
+
     else:
         try:
             pid = int(pid_text.strip())
