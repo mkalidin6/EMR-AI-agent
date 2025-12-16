@@ -118,13 +118,13 @@ def load_all_tables(base: Path):
 
 
 # Load once (same behavior as your original file)
-#ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP = load_all_tables()
+# ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP = load_all_tables()
 
 
 global ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP
 
 if ADMISSIONS is None:
-    ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP = load_all_tables()
+    # ADMISSIONS, LABS, MEDS, VITALS, DIAG, ICD, LAB_LOOKUP = load_all_tables()
 
 def load_patient_data(subject_id: int) -> Dict[str, Any] | None:
     p_adm = ADMISSIONS[ADMISSIONS["subject_id"] == subject_id].copy()
