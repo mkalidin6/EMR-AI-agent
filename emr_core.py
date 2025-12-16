@@ -45,7 +45,7 @@ except Exception:
 # ============================================================
 # CONFIG – update this path to your MIMIC-IV demo folder
 # ============================================================
-BASE = Path(__file__).parent / "data"
+BASE = Path(__file__).parent / "mimic-iv-clinical-database-demo-2.2"
 HOSP = BASE / "hosp"
 ICU = BASE / "icu"
 
